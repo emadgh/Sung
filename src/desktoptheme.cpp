@@ -6,6 +6,9 @@
 #include <QStandardPaths>
 
 DesktopTheme::DesktopTheme(QObject *parent) : QObject(parent) {
+#ifndef Q_OS_LINUX
+  return;
+#else
   m_path = qEnvironmentVariable("SUNG_NOCTALIA_COLORS");
   if (m_path.isEmpty())
     m_path = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
@@ -18,8 +21,12 @@ DesktopTheme::DesktopTheme(QObject *parent) : QObject(parent) {
   connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
           [this] { m_debounce.start(); });
   reload();
+#endif
 }
 void DesktopTheme::reload() {
+#ifndef Q_OS_LINUX
+  return;
+#else
   // Watch the directory as well: Noctalia can replace the file atomically.
   QString dir = QFileInfo(m_path).absolutePath();
   while (!QFileInfo::exists(dir) && dir != "/") dir = QFileInfo(dir).absolutePath();
@@ -60,4 +67,5 @@ void DesktopTheme::reload() {
   m_dark = bg.lightnessF() < .5;
   m_colors = next;
   emit changed();
+#endif
 }
