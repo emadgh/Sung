@@ -1,4 +1,4 @@
-name: Windows build
+name: Cross-platform build
 
 on:
   push:
@@ -8,6 +8,35 @@ on:
   workflow_dispatch:
 
 jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: 'qtmultimedia qtsvg qtshadertools'
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-linux -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF -DSUNG_DIAGNOSTICS=OFF
+
+      - name: Build
+        run: cmake --build build-linux --parallel 4
+
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-linux/sung --version
+
   windows:
     runs-on: windows-2022
     steps:
