@@ -271,10 +271,17 @@ void Backend::outputsChanged(){
 void Backend::setPauseOnDisconnect(bool enabled){
   if(enabled==pauseOnDisconnect())return;
   m_settings.setValue("pauseOnDisconnect",enabled);emit settingsChanged();m_outputPort.clear();
+#ifdef Q_OS_LINUX
   if(enabled){if(m_portMonitor.state()==QProcess::NotRunning)m_portMonitor.start("pactl",{"subscribe"});m_portDebounce.start();}
   else {m_portDebounce.stop();m_portTimeout.stop();m_portMonitor.kill();m_portProbe.kill();}
+#else
+  if(!enabled){m_portDebounce.stop();m_portTimeout.stop();m_portMonitor.kill();m_portProbe.kill();}
+#endif
 }
 void Backend::setupDisconnectMonitor(){
+#ifndef Q_OS_LINUX
+  return;
+#else
   m_portDebounce.setSingleShot(true);m_portDebounce.setInterval(120);m_portTimeout.setSingleShot(true);m_portTimeout.setInterval(2500);
   connect(&m_portTimeout,&QTimer::timeout,this,[this]{m_portProbe.kill();});
   connect(&m_portDebounce,&QTimer::timeout,this,&Backend::refreshOutputPort);
@@ -290,8 +297,15 @@ void Backend::setupDisconnectMonitor(){
     if(m_portDirty){m_portDirty=false;m_portDebounce.start();}
   });
   if(pauseOnDisconnect()){m_portMonitor.start("pactl",{"subscribe"});m_portDebounce.start();}
+#endif
 }
-void Backend::refreshOutputPort(){if(!pauseOnDisconnect())return;if(m_portProbe.state()!=QProcess::NotRunning){m_portDirty=true;return;}m_portProbe.start("pactl",{"-f","json","list","sinks"});m_portTimeout.start();}
+void Backend::refreshOutputPort(){
+#ifndef Q_OS_LINUX
+  return;
+#else
+  if(!pauseOnDisconnect())return;if(m_portProbe.state()!=QProcess::NotRunning){m_portDirty=true;return;}m_portProbe.start("pactl",{"-f","json","list","sinks"});m_portTimeout.start();
+#endif
+}
 void Backend::inspectOutputPorts(const QVariantList &sinks){
   for(const auto &v:sinks){const auto s=v.toMap();if(s.value("description").toString()!=m_outputDescription && s.value("name").toString()!=QString::fromUtf8(m_outputId))continue;
     const auto port=s.value("active_port").toString();
