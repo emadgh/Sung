@@ -6,6 +6,7 @@
 #include "windowresources.h"
 #include <QDir>
 #include <QCache>
+#include <QCryptographicHash>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QFile>
@@ -25,7 +26,9 @@
 #include <QStandardPaths>
 #include <QSvgRenderer>
 #include <QTimer>
+#ifndef Q_OS_WIN
 #include <unistd.h>
+#endif
 #ifdef SUNG_DIAGNOSTICS
 #include "uitest.h"
 #include <QElapsedTimer>
@@ -71,6 +74,16 @@ private:
   QCache<QString,QImage> m_masks{512*1024};
   QMutex m_mutex;
 };
+static QString instanceServerName() {
+#ifdef Q_OS_WIN
+  const auto identity = QDir::homePath().toUtf8();
+  const auto digest = QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(16);
+  return QStringLiteral("sung-") + QString::fromLatin1(digest);
+#else
+  return QStringLiteral("sung-") + QString::number(getuid());
+#endif
+}
+
 int main(int argc, char **argv) {
 #ifdef SUNG_DIAGNOSTICS
   QElapsedTimer startupTimer;startupTimer.start();
@@ -94,7 +107,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   QLocalSocket peer;
-  peer.connectToServer("sung-" + QString::number(getuid()));
+  peer.connectToServer(instanceServerName());
   if (!args.contains("--isolated") && peer.waitForConnected(120)) {
     peer.write(args.size() > 1 ? args.last().toUtf8() : QByteArray("raise"));
     peer.flush();
@@ -103,9 +116,9 @@ int main(int argc, char **argv) {
   }
   QLocalServer server;
   if (!args.contains("--isolated")) {
-    QLocalServer::removeServer("sung-" + QString::number(getuid()));
+    QLocalServer::removeServer(instanceServerName());
     server.setSocketOptions(QLocalServer::UserAccessOption);
-    server.listen("sung-" + QString::number(getuid()));
+    server.listen(instanceServerName());
   }
   QQuickStyle::setStyle("Basic");
   QFont font(QFontDatabase::families().contains("Google Sans Flex")

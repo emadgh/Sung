@@ -1,4 +1,8 @@
 #pragma once
+#include <QtGlobal>
+class Backend;
+
+#ifdef Q_OS_LINUX
 #include "backend.h"
 #include <QDBusAbstractAdaptor>
 #include <QDBusObjectPath>
@@ -98,4 +102,6 @@ private:
   void changed();
   Backend *b;
 };
+#endif
+
 void registerMpris(Backend *);

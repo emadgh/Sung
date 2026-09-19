@@ -23,9 +23,11 @@
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QUuid>
+#ifdef Q_OS_UNIX
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 static QString dataPath() {
   return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -224,8 +226,10 @@ void Backend::cancel(const QString &channel) {
   p->disconnect(this);
   for(auto timer:p->findChildren<QTimer*>()) timer->stop();
   connect(p,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),p,&QObject::deleteLater);
+#ifdef Q_OS_UNIX
   if(p->processId()>0) ::kill(-p->processId(),SIGKILL);
   if(p->state()==QProcess::Starting) connect(p,&QProcess::started,p,[p]{if(p->processId()>0)::kill(-p->processId(),SIGKILL);p->kill();});
+#endif
   p->kill();
   if(p->state()==QProcess::NotRunning)p->deleteLater();
 }
@@ -236,20 +240,40 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
   // when cancel() disconnects the backend callback while killing its process group.
   if(lifetime) connect(p,&QObject::destroyed,[lifetime]{});
   m_processes.insert(channel, p);
+#ifdef Q_OS_UNIX
   p->setChildProcessModifier([] { ::setsid(); });
+#endif
+  const auto appDir = QCoreApplication::applicationDirPath();
   QString helper = qEnvironmentVariable("SUNG_HELPER");
-  if (helper.isEmpty())
-    helper = QCoreApplication::applicationDirPath() + "/../helper/catalog.py";
-  if (!QFile::exists(helper))
-    helper = QCoreApplication::applicationDirPath() + "/../lib/sung/catalog.py";
+  if (helper.isEmpty()) {
+    const QStringList candidates{
+        appDir + "/helper/catalog.py",
+        appDir + "/../helper/catalog.py",
+        appDir + "/../../helper/catalog.py",
+        appDir + "/../lib/sung/catalog.py"};
+    helper = candidates.first();
+    for (const auto &candidate : candidates) {
+      if (QFile::exists(candidate)) { helper = candidate; break; }
+    }
+  }
   QString python = qEnvironmentVariable("SUNG_PYTHON");
   if (python.isEmpty()) {
-    auto bundled =
-        QCoreApplication::applicationDirPath() + "/../runtime/bin/python";
-    if (!QFile::exists(bundled))
-      bundled = QCoreApplication::applicationDirPath() +
-                "/../lib/sung/runtime/bin/python";
-    python = QFile::exists(bundled) ? bundled : QStringLiteral("python3");
+    const QStringList candidates{
+        appDir + "/runtime/Scripts/python.exe",
+        appDir + "/../runtime/Scripts/python.exe",
+        appDir + "/../../runtime/Scripts/python.exe",
+        appDir + "/runtime/bin/python",
+        appDir + "/../runtime/bin/python",
+        appDir + "/../../runtime/bin/python",
+        appDir + "/../lib/sung/runtime/bin/python"};
+    for (const auto &candidate : candidates) {
+      if (QFile::exists(candidate)) { python = candidate; break; }
+    }
+#ifdef Q_OS_WIN
+    if (python.isEmpty()) python = QStringLiteral("python");
+#else
+    if (python.isEmpty()) python = QStringLiteral("python3");
+#endif
   }
   auto timer = new QTimer(p);
   timer->setSingleShot(true);
@@ -265,7 +289,7 @@ void Backend::request(const QString &channel, QVariantMap args, Callback done, s
             m_processes.remove(channel);
             done({{"ok", false},
                   {"error",
-                   "YouTube helper could not start. Run scripts/setup.sh."}});
+                   "YouTube helper could not start. Run the platform setup script."}});
             p->deleteLater();
           });
   connect(p, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
@@ -1959,7 +1983,9 @@ void Backend::updatePreparation(){
     // Preload failures and oversized/direct streams leave normal playback in charge.
     if(data.value("ok").toBool()&&file.isFile()&&file.size()<=32*1024*1024&&file.canonicalPath()==QFileInfo(directory->path()).canonicalFilePath()){
       m_preparedData=data;
+#ifdef Q_OS_UNIX
       QFile buffered(file.filePath());if(buffered.open(QIODevice::ReadOnly))::posix_fadvise(buffered.handle(),0,0,POSIX_FADV_DONTNEED);
+#endif
     }
     else m_preparedDirectory.reset();
   },directory);

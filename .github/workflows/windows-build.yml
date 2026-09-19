@@ -1,0 +1,93 @@
+name: Cross-platform build
+
+on:
+  push:
+    branches:
+      - windows-support
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: 'qtmultimedia qtshadertools'
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-linux -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF -DSUNG_DIAGNOSTICS=OFF
+
+      - name: Build
+        run: cmake --build build-linux --parallel 4
+
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build-linux/sung --version
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: 'qtmultimedia qtshadertools'
+          cache: true
+
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build-windows
+          -G "Visual Studio 17 2022" -A x64
+          -DBUILD_TESTING=OFF -DSUNG_DIAGNOSTICS=OFF
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-windows --config Release --parallel
+
+      - name: Smoke test
+        shell: pwsh
+        run: .\build-windows\Release\sung.exe --version
+
+      - name: Stage application
+        shell: pwsh
+        run: |
+          New-Item dist\Sung -ItemType Directory -Force | Out-Null
+          Copy-Item build-windows\Release\sung.exe dist\Sung\Sung.exe
+          Copy-Item helper dist\Sung\helper -Recurse
+          New-Item dist\Sung\licenses -ItemType Directory -Force | Out-Null
+          Copy-Item LICENSE dist\Sung\licenses\LICENSE
+          Copy-Item NOTICE dist\Sung\licenses\NOTICE
+          Copy-Item licenses\MaterialSymbols-LICENSE.txt dist\Sung\licenses\MaterialSymbols-LICENSE.txt
+          windeployqt --release --qmldir qml --no-translations dist\Sung\Sung.exe
+          @"
+          Sung Windows CI build.
+          YouTube/helper features require Python 3.11+ with:
+            python -m pip install -r helper\requirements.txt
+          ffmpeg/ffprobe are used for local metadata/artwork when available.
+          "@ | Set-Content -Encoding UTF8 dist\Sung\README-Windows.txt
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sung-windows-x64
+          path: dist/Sung
+          if-no-files-found: error
